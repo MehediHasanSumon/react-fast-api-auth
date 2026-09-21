@@ -1,0 +1,131 @@
+name: Continuous Integration (CI)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend-checks:
+    name: Backend Lint & Automated Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hospital_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Python Syntax & Compilation Verification
+        run: |
+          python -m py_compile backend/app/main.py
+          python -m py_compile backend/app/core/decorators.py
+          python -m py_compile backend/app/core/security.py
+
+      - name: Run Database Migrations & Seeds
+        env:
+          POSTGRES_SERVER: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hospital_test_db
+          SECRET_KEY: test-secret-key-for-ci-pipeline-2026
+        run: |
+          cd backend
+          alembic upgrade head
+          python -m app.db.seeds
+
+      - name: Run Pytest Test Suite
+        env:
+          POSTGRES_SERVER: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hospital_test_db
+          SECRET_KEY: test-secret-key-for-ci-pipeline-2026
+        run: |
+          cd backend
+          PYTHONPATH=. pytest tests/ -v
+
+  frontend-checks:
+    name: Frontend Lint, TypeCheck & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "npm"
+          cache-dependency-path: frontend/package.json
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm install
+
+      - name: Code Quality Linting
+        run: |
+          cd frontend
+          npm run lint
+
+      - name: TypeScript Static Type Checking
+        run: |
+          cd frontend
+          npx tsc --noEmit
+
+      - name: Production Bundle Compilation
+        env:
+          VITE_API_URL: /api/v1
+        run: |
+          cd frontend
+          npm run build
+
+  docker-validation:
+    name: Validate Docker Images Build
+    needs: [ backend-checks, frontend-checks ]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate Backend Docker Build
+        run: |
+          docker build -t hospital-backend:ci ./backend
+
+      - name: Validate Frontend Docker Build
+        run: |
+          docker build --build-arg VITE_API_URL=/api/v1 -t hospital-frontend:ci ./frontend

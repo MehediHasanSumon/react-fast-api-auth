@@ -1,0 +1,53 @@
+/**
+ * Centralized API endpoints for the Application
+ */
+export const API_ENDPOINTS = {
+  HEALTH: '/health',
+  AUTH: {
+    LOGIN: '/auth/login',
+    REGISTER: '/auth/register',
+    LOGOUT: '/auth/logout',
+    REFRESH: '/auth/refresh',
+    ME: '/auth/me',
+    SESSIONS: '/auth/sessions',
+    FORGOT_PASSWORD: '/auth/forgot-password',
+    RESET_PASSWORD: '/auth/reset-password',
+    VERIFY_EMAIL: '/auth/verify-email',
+    VERIFY_OTP: '/auth/verify-otp',
+    CONFIRM_PASSWORD: '/auth/confirm-password',
+    CHANGE_PASSWORD: '/auth/change-password',
+  },
+  SESSIONS: {
+    LIST: '/sessions',
+    CURRENT: '/sessions/current',
+    REVOKE: (id: string) => `/sessions/${id}`,
+    REVOKE_ALL: '/sessions/revoke-all',
+  },
+  USERS: {
+    LIST: '/users',
+    CREATE: '/users',
+    GET: (id: string) => `/users/${id}`,
+    UPDATE: (id: string) => `/users/${id}`,
+    UPDATE_STATUS: (id: string) => `/users/${id}/status`,
+    DELETE: (id: string) => `/users/${id}`,
+    BULK_DELETE: '/users/bulk-delete',
+  },
+  ROLES: {
+    LIST: '/roles',
+    CREATE: '/roles',
+    GET: (id: string) => `/roles/${id}`,
+    UPDATE: (id: string) => `/roles/${id}`,
+    DELETE: (id: string) => `/roles/${id}`,
+    BULK_DELETE: '/roles/bulk-delete',
+    PERMISSIONS: (id: string) => `/roles/${id}/permissions`,
+  },
+  PERMISSIONS: {
+    LIST: '/permissions',
+    ALL: '/permissions/all',
+    CREATE: '/permissions',
+    GET: (id: string) => `/permissions/${id}`,
+    UPDATE: (id: string) => `/permissions/${id}`,
+    DELETE: (id: string) => `/permissions/${id}`,
+    BULK_DELETE: '/permissions/bulk-delete',
+  },
+} as const

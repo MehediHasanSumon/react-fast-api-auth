@@ -1,0 +1,77 @@
+name: Continuous Deployment (CD) - Live Auto Deploy
+
+on:
+  workflow_run:
+    workflows: ["Continuous Integration (CI)"]
+    types: [ completed ]
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target deployment environment"
+        required: true
+        default: "production"
+        type: choice
+        options:
+          - production
+          - staging
+
+jobs:
+  deploy-to-live:
+    name: Deploy to Production Server
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Announce Deployment Start
+        run: |
+          echo "=========================================================="
+          echo "🚀 Initiating automated live deployment to production..."
+          echo "Commit: ${{ github.sha }}"
+          echo "Author: ${{ github.actor }}"
+          echo "=========================================================="
+
+      - name: Deploy via SSH to VPS / Live Server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_SSH_PORT || 22 }}
+          script_stop: true
+          envs: GITHUB_SHA
+          script: |
+            set -e
+            echo "Connected to server. Navigating to project directory..."
+            
+            # Locate application directory
+            if [ -d "/var/www/hospital" ]; then
+                cd /var/www/hospital
+            elif [ -d "$HOME/hospital" ]; then
+                cd "$HOME/hospital"
+            elif [ -n "${{ secrets.SERVER_APP_DIR }}" ] && [ -d "${{ secrets.SERVER_APP_DIR }}" ]; then
+                cd "${{ secrets.SERVER_APP_DIR }}"
+            else
+                echo "Error: Hospital project directory not found! Checked /var/www/hospital and ~/hospital."
+                exit 1
+            fi
+            
+            echo "Target directory: $(pwd)"
+            
+            # Make sure deploy script is executable and trigger deployment
+            chmod +x deploy.sh
+            ./deploy.sh
+
+      - name: Post Deployment Notification
+        if: success()
+        run: |
+          echo "=========================================================="
+          echo "✅ Production deployment completed successfully!"
+          echo "=========================================================="
+
+      - name: Deployment Failure Alert
+        if: failure()
+        run: |
+          echo "=========================================================="
+          echo "❌ Deployment failed! Please inspect server logs."
+          echo "=========================================================="
