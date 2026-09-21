@@ -1,7 +1,12 @@
+import os
+import time
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session as OrmSession
+from PIL import Image, ImageOps
 
 from app.api.deps import get_current_user, get_db, get_token_from_request
 from app.core.config import settings
@@ -14,19 +19,28 @@ from app.core.security import (
     generate_opaque_token,
     hash_password,
     set_auth_cookies,
+    set_user_display_cookie,
     verify_password,
 )
 from app.models.session import Session as UserSession
 from app.models.user import User, UserStatus
+from app.models.password_reset import PasswordReset
+from app.services.email import send_password_reset_email
 from app.schemas.auth import (
     AuthResponse,
+    AvatarUploadResponse,
+    ChangePasswordRequest,
+    ForgotPasswordRequest,
     MessageResponse,
+    ResetPasswordRequest,
     TokenRefreshRequest,
     TokenRefreshResponse,
+    UpdateProfileRequest,
     UserLoginRequest,
     UserRegisterRequest,
     UserResponse,
     UserSessionResponse,
+    VerifyResetTokenRequest,
 )
 
 router = APIRouter()
@@ -164,12 +178,22 @@ def login(
     response: Response,
     db: OrmSession = Depends(get_db),
 ):
-    # 1. Fetch user by email
-    user = db.query(User).filter(User.email == payload.email.lower().strip()).first()
+    # 1. Fetch user by email or mobile number
+    ident = payload.email.strip()
+    user = (
+        db.query(User)
+        .filter(
+            or_(
+                func.lower(User.email) == ident.lower(),
+                User.mobile_number == ident,
+            )
+        )
+        .first()
+    )
     if not user or not verify_password(payload.password, user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email address or password.",
+            detail="Invalid email/mobile number or password.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -219,9 +243,12 @@ def login(
         "id": user.id,
         "name": user.name,
         "email": user.email,
+        "avatar": user.avatar,
         "status": user.status.value,
         "mobile_number": user.mobile_number,
         "is_verified": user.is_verified,
+        "roles": user.role_names_list,
+        "permissions": user.all_permissions_list,
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
     set_auth_cookies(
@@ -413,3 +440,347 @@ def get_user_sessions(
         .all()
     )
     return [UserSessionResponse.model_validate(s) for s in sessions]
+
+
+@router.post(
+    "/forgot-password",
+    response_model=MessageResponse,
+    summary="Request Password Reset",
+    description="Generate a secure 6-digit OTP code and direct reset link and send via email.",
+)
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    db: OrmSession = Depends(get_db),
+):
+    email_clean = payload.email.lower().strip()
+    user = db.query(User).filter(func.lower(User.email) == email_clean).first()
+
+    # Always return standard generic response to prevent account enumeration
+    if not user:
+        return MessageResponse(
+            message="If an account with that email exists, password reset instructions have been sent to your inbox."
+        )
+
+    # Generate 6-digit OTP code and secure reset token
+    otp = f"{secrets.randbelow(900000) + 100000}"
+    reset_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+
+    # Invalidate prior unredeemed resets for this user
+    db.query(PasswordReset).filter(
+        PasswordReset.user_id == user.id,
+        PasswordReset.is_used == False,
+    ).update({"is_used": True})
+
+    reset_record = PasswordReset(
+        user_id=user.id,
+        email=user.email,
+        token=reset_token,
+        otp=otp,
+        expires_at=expires_at,
+        is_used=False,
+    )
+    db.add(reset_record)
+    db.commit()
+
+    # Dispatch email with both OTP and Reset Link
+    send_password_reset_email(
+        to_email=user.email,
+        user_name=user.name,
+        otp=otp,
+        reset_token=reset_token,
+    )
+
+    return MessageResponse(
+        message="If an account with that email exists, password reset instructions have been sent to your inbox."
+    )
+
+
+@router.post(
+    "/verify-reset-token",
+    response_model=MessageResponse,
+    summary="Verify Reset OTP or Token",
+    description="Verify if a password reset token or 6-digit OTP is valid and unexpired.",
+)
+def verify_reset_token(
+    payload: VerifyResetTokenRequest,
+    db: OrmSession = Depends(get_db),
+):
+    email_clean = payload.email.lower().strip()
+    code = payload.token_or_otp.strip()
+    now_utc = datetime.now(timezone.utc)
+
+    reset_record = (
+        db.query(PasswordReset)
+        .filter(
+            func.lower(PasswordReset.email) == email_clean,
+            PasswordReset.is_used == False,
+            PasswordReset.expires_at > now_utc,
+            or_(PasswordReset.token == code, PasswordReset.otp == code),
+        )
+        .first()
+    )
+    if not reset_record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code / link. Please request a new one.",
+        )
+    return MessageResponse(message="Reset code is valid.")
+
+
+@router.post(
+    "/reset-password",
+    response_model=AuthResponse,
+    summary="Reset Password and Authenticate User",
+    description="Update password using verified OTP or token, invalidate prior sessions, create fresh session and cookies.",
+)
+def reset_password(
+    payload: ResetPasswordRequest,
+    request: Request,
+    response: Response,
+    db: OrmSession = Depends(get_db),
+):
+    email_clean = payload.email.lower().strip()
+    code = payload.token_or_otp.strip()
+    now_utc = datetime.now(timezone.utc)
+
+    reset_record = (
+        db.query(PasswordReset)
+        .filter(
+            func.lower(PasswordReset.email) == email_clean,
+            PasswordReset.is_used == False,
+            PasswordReset.expires_at > now_utc,
+            or_(PasswordReset.token == code, PasswordReset.otp == code),
+        )
+        .first()
+    )
+    if not reset_record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code / link. Please request a new one.",
+        )
+
+    user = db.query(User).filter(User.id == reset_record.user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User account not found.",
+        )
+
+    # 1. Update password and mark token as used
+    user.password = hash_password(payload.password)
+    reset_record.is_used = True
+
+    # 2. Invalidate all prior sessions for security
+    db.query(UserSession).filter(UserSession.user_id == user.id).update({"is_active": False})
+
+    # 3. Create fresh authenticated session for automatic login
+    access_token = create_access_token(subject=user.id)
+    refresh_token = create_refresh_token(subject=user.id)
+    session_token = generate_opaque_token(32)
+
+    client_ip, user_agent = _extract_client_info(request)
+    session_expiry = datetime.now(timezone.utc) + timedelta(
+        days=settings.REFRESH_TOKEN_EXPIRE_DAYS
+    )
+
+    new_session = UserSession(
+        user_id=user.id,
+        session_token=session_token,
+        refresh_token=refresh_token,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        is_active=True,
+        expires_at=session_expiry,
+    )
+    db.add(new_session)
+    db.commit()
+
+    # 4. Set HttpOnly cookies & client display cookie
+    user_display = {
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "avatar": user.avatar,
+        "status": user.status.value,
+        "mobile_number": user.mobile_number,
+        "is_verified": user.is_verified,
+        "roles": user.role_names_list,
+        "permissions": user.all_permissions_list,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+    }
+    set_auth_cookies(
+        response=response,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        remember_me=False,
+        user_display=user_display,
+    )
+
+    return AuthResponse(
+        message="Your password has been successfully reset. You are now logged in.",
+        user=UserResponse.model_validate(user),
+        token_type="Bearer",
+        access_token=access_token,
+    )
+
+
+@router.post(
+    "/change-password",
+    response_model=MessageResponse,
+    summary="Change Account Password",
+    description="Update password for authenticated user after verifying current password.",
+)
+@require_auth
+def change_password(
+    payload: ChangePasswordRequest,
+    db: OrmSession = Depends(get_db),
+):
+    user = current_user()
+    if not verify_password(payload.current_password, user.password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect.",
+        )
+
+    if payload.new_password != payload.confirm_new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New passwords do not match.",
+        )
+
+    if verify_password(payload.new_password, user.password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password cannot be the same as your current password.",
+        )
+
+    db_user = db.query(User).filter(User.id == user.id).first()
+    db_user.password = hash_password(payload.new_password)
+    db.commit()
+
+    return MessageResponse(message="Password updated successfully.")
+
+
+@router.put(
+    "/profile",
+    response_model=UserResponse,
+    summary="Update Authenticated User Profile",
+    description="Update personal details (name, mobile number) for the authenticated user.",
+)
+@require_auth
+def update_profile(
+    payload: UpdateProfileRequest,
+    request: Request,
+    response: Response,
+    db: OrmSession = Depends(get_db),
+):
+    user = current_user()
+    db_user = db.query(User).filter(User.id == user.id).first()
+
+    # Validate mobile uniqueness if changed
+    if payload.mobile_number and payload.mobile_number.strip():
+        clean_mobile = payload.mobile_number.strip()
+        existing = (
+            db.query(User)
+            .filter(User.mobile_number == clean_mobile, User.id != user.id)
+            .first()
+        )
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This contact number is already registered to another account.",
+            )
+        db_user.mobile_number = clean_mobile
+    else:
+        db_user.mobile_number = None
+
+    db_user.name = payload.name.strip()
+    db.commit()
+    db.refresh(db_user)
+
+    # Update display cookie
+    set_user_display_cookie(response, db_user)
+
+    return UserResponse.model_validate(db_user)
+
+
+@router.post(
+    "/avatar",
+    response_model=AvatarUploadResponse,
+    summary="Upload Profile Avatar with Pillow",
+    description="Securely process, resize to 400x400 square, and optimize avatar using Pillow.",
+)
+@require_auth
+def upload_avatar(
+    request: Request,
+    response: Response,
+    file: UploadFile = File(...),
+    db: OrmSession = Depends(get_db),
+):
+    user = current_user()
+    allowed_types = {"image/jpeg", "image/png", "image/webp", "image/jpg"}
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file format. Only JPEG, PNG, and WebP images are supported.",
+        )
+
+    # Pillow image validation and reading
+    try:
+        img = Image.open(file.file)
+        img.verify()
+        file.file.seek(0)
+        img = Image.open(file.file)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Corrupt or unreadable image file.",
+        )
+
+    # Auto-orient based on EXIF (fixes sideways smartphone photos)
+    img = ImageOps.exif_transpose(img)
+
+    # Convert modes
+    if img.mode in ("RGBA", "LA", "P"):
+        img = img.convert("RGBA")
+    else:
+        img = img.convert("RGB")
+
+    # Crop and fit into a clean 400x400 square
+    img = ImageOps.fit(img, (400, 400), Image.Resampling.LANCZOS)
+
+    # Prepare storage directory
+    avatar_dir = os.path.join(settings.uploads_path, "avatars")
+    os.makedirs(avatar_dir, exist_ok=True)
+
+    # Delete old local avatar file if exists
+    db_user = db.query(User).filter(User.id == user.id).first()
+    if db_user.avatar and db_user.avatar.startswith("/uploads/avatars/"):
+        old_filename = os.path.basename(db_user.avatar)
+        old_path = os.path.join(avatar_dir, old_filename)
+        if os.path.exists(old_path):
+            try:
+                os.remove(old_path)
+            except OSError:
+                pass
+
+    # Save new image as WebP
+    filename = f"avatar_{user.id}_{int(time.time())}.webp"
+    target_path = os.path.join(avatar_dir, filename)
+    img.save(target_path, format="WEBP", quality=85, optimize=True)
+
+    # Update database
+    relative_url = f"/uploads/avatars/{filename}"
+    db_user.avatar = relative_url
+    db.commit()
+    db.refresh(db_user)
+
+    # Update client display cookie
+    set_user_display_cookie(response, db_user)
+
+    return AvatarUploadResponse(
+        message="Profile avatar updated successfully.",
+        avatar_url=relative_url,
+        user=UserResponse.model_validate(db_user),
+    )

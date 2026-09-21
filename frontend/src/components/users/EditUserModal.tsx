@@ -6,12 +6,13 @@ import { Pencil } from 'lucide-react'
 import { Dialog } from '../ui/Dialog'
 import { Input } from '../ui/Input'
 import { Select } from '../ui/Select'
+import { Checkbox } from '../ui/Checkbox'
 import { Button } from '../ui/Button'
 import { Alert } from '../ui/Alert'
 import { http } from '../../api/client'
 import { API_ENDPOINTS } from '../../api/endpoints'
 import type { ApiErrorDetail } from '../../api/types'
-import type { UserRecord, UserRole, Department, UserStatus } from '../../data/mockUsers'
+import type { UserRecord, Department, UserStatus } from '../../data/mockUsers'
 
 const editUserSchema = z.object({
   name: z
@@ -185,11 +186,16 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({
         payload
       )
 
+      const updatedRoles = availableRoles
+        .filter((r) => selectedRoleIds.has(r.id))
+        .map((r) => r.name)
+
       const updatedRecord: UserRecord = {
         id: updated.id,
         name: updated.name,
         email: updated.email,
-        role: (updated.role as UserRole) || user.role,
+        role: updatedRoles.join(', ') || '—',
+        roles: updatedRoles,
         department: (updated.department as Department) || user.department,
         status: data.status,
         phoneNumber: updated.mobile_number || undefined,
@@ -325,29 +331,33 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({
 
         {/* Row 4: Multi-Role Assignment */}
         {availableRoles.length > 0 && (
-          <div className="space-y-1.5 text-left">
+          <div className="space-y-2 text-left">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 select-none">
               Assign Roles
               <span className="text-gray-400 dark:text-gray-500 font-normal ml-1 text-xs">
                 (Optional)
               </span>
             </label>
-            <div className="flex flex-wrap gap-2 p-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/40">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/40 max-h-48 overflow-y-auto">
               {availableRoles.map((r) => {
                 const isSelected = selectedRoleIds.has(r.id)
                 return (
-                  <button
+                  <div
                     key={r.id}
-                    type="button"
-                    onClick={() => toggleRole(r.id)}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium border transition cursor-pointer flex items-center gap-1.5 ${
+                    className={`flex items-center px-3 py-2.5 rounded-lg border transition select-none ${
                       isSelected
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-700 hover:border-gray-400'
+                        ? 'bg-blue-50/80 dark:bg-blue-950/50 border-blue-300 dark:border-blue-700'
+                        : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                     }`}
                   >
-                    <span>{r.name}</span>
-                  </button>
+                    <Checkbox
+                      id={`edit-role-${r.id}`}
+                      label={<span className="text-xs font-medium text-gray-900 dark:text-gray-100">{r.name}</span>}
+                      checked={isSelected}
+                      onChange={() => toggleRole(r.id)}
+                      containerClassName="w-full cursor-pointer"
+                    />
+                  </div>
                 )
               })}
             </div>

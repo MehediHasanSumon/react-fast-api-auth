@@ -25,8 +25,16 @@ if settings.BACKEND_CORS_ORIGINS:
         allow_headers=["*"],
     )
 
+import os
+from fastapi.staticfiles import StaticFiles
+
 # Include API v1 routes
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# Mount uploads directory for static user avatar serving
+upload_dir_path = settings.uploads_path
+os.makedirs(os.path.join(upload_dir_path, "avatars"), exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=upload_dir_path), name="uploads")
 
 
 @app.get("/", tags=["Root"])

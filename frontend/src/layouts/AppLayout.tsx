@@ -20,6 +20,7 @@ import { ThemeToggle } from '../components/ThemeToggle'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { logoutUser } from '../store/slices/authSlice'
 import { hasPermission } from '../utils/permissions'
+import { getAvatarUrl } from '../utils/avatar'
 
 export const AppLayout = () => {
   const navigate = useNavigate()
@@ -62,13 +63,30 @@ export const AppLayout = () => {
     }
   }
 
-  const allNavItems = [
-    {
-      to: '/dashboard',
-      label: 'Dashboard',
-      icon: LayoutDashboard,
-      permission: null,
-    },
+  const isUserMgmtActive =
+    location.pathname.startsWith('/users') ||
+    location.pathname.startsWith('/roles') ||
+    location.pathname.startsWith('/permissions')
+
+  const [userMgmtOpen, setUserMgmtOpen] = useState(false)
+
+  // Automatically close User Management dropdown when navigating away to another option
+  useEffect(() => {
+    if (!isUserMgmtActive) {
+      setUserMgmtOpen(false)
+    }
+  }, [isUserMgmtActive])
+
+  const handleToggleUserMgmt = () => {
+    if (!sidebarExpanded) {
+      setSidebarExpanded(true)
+      setUserMgmtOpen(true)
+    } else {
+      setUserMgmtOpen((prev) => !prev)
+    }
+  }
+
+  const userMgmtSubItems = [
     {
       to: '/users',
       label: 'User Management',
@@ -83,16 +101,16 @@ export const AppLayout = () => {
     },
     {
       to: '/permissions',
-      label: 'Permissions',
+      label: 'Permission Management',
       icon: KeyRound,
       permission: 'permissions.view',
     },
-  ]
-
-  const navItems = allNavItems.filter((item) => {
+  ].filter((item) => {
     if (!item.permission) return true
     return hasPermission(user, item.permission)
   })
+
+  const hasUserMgmtAccess = userMgmtSubItems.length > 0
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 font-sans text-gray-900 dark:text-gray-100 antialiased selection:bg-blue-100 selection:text-blue-700 transition-colors duration-150">
@@ -166,8 +184,16 @@ export const AppLayout = () => {
                   aria-haspopup="true"
                   title="User Menu"
                 >
-                  <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-semibold shrink-0">
-                    {user.name.charAt(0).toUpperCase()}
+                  <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-semibold shrink-0 overflow-hidden">
+                    {user.avatar ? (
+                      <img
+                        src={getAvatarUrl(user.avatar) || ''}
+                        alt={user.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      user.name.charAt(0).toUpperCase()
+                    )}
                   </div>
                   <span className="max-w-[120px] truncate hidden md:inline">{user.name}</span>
                   <ChevronDown
@@ -181,19 +207,32 @@ export const AppLayout = () => {
                 {userMenuOpen && (
                   <div className="absolute right-0 mt-2 w-56 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-lg py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100 text-left">
                     {/* User Name & Info Header */}
-                    <div className="px-4 py-2.5 border-b border-gray-100 dark:border-gray-800">
-                      <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">
-                        {user.name}
-                      </p>
-                      <p className="text-2xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
-                        {user.email}
-                      </p>
+                    <div className="px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-semibold shrink-0 overflow-hidden">
+                        {user.avatar ? (
+                          <img
+                            src={getAvatarUrl(user.avatar) || ''}
+                            alt={user.name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          user.name.charAt(0).toUpperCase()
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">
+                          {user.name}
+                        </p>
+                        <p className="text-2xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
+                          {user.email}
+                        </p>
+                      </div>
                     </div>
 
                     {/* Navigation Items */}
                     <div className="py-1">
                       <Link
-                        to="/dashboard"
+                        to="/profile"
                         onClick={() => setUserMenuOpen(false)}
                         className="flex items-center gap-2.5 px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100 transition cursor-pointer"
                       >
@@ -269,35 +308,105 @@ export const AppLayout = () => {
       >
         {/* Navigation Items */}
         <div className="p-4 space-y-1.5 overflow-y-auto">
-          {navItems.map((item) => {
-            const Icon = item.icon
-            const isActive =
-              location.pathname === item.to ||
-              (item.to === '/dashboard' && location.pathname === '/')
+          {/* Dashboard Link */}
+          <NavLink
+            to="/dashboard"
+            onClick={() => {
+              setMobileOpen(false)
+              setUserMgmtOpen(false)
+            }}
+            className={`flex items-center gap-3 h-10 px-3.5 rounded-lg text-sm font-medium transition cursor-pointer ${
+              location.pathname === '/dashboard' || location.pathname === '/'
+                ? 'text-blue-600 dark:text-blue-400 bg-blue-50/80 dark:bg-blue-950/60 font-semibold'
+                : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800'
+            } ${!sidebarExpanded ? 'lg:justify-center' : ''}`}
+            title="Dashboard"
+          >
+            <LayoutDashboard className="w-5 h-5 shrink-0" />
+            <span
+              className={`truncate transition-opacity duration-200 ${
+                !sidebarExpanded ? 'lg:hidden' : 'block'
+              }`}
+            >
+              Dashboard
+            </span>
+          </NavLink>
 
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                onClick={() => setMobileOpen(false)}
-                className={`flex items-center gap-3 h-10 px-3.5 rounded-lg text-sm font-medium transition cursor-pointer ${
-                  isActive
+          {/* User Management Dropdown Button & Submenu */}
+          {hasUserMgmtAccess && (
+            <div className="space-y-1">
+              <button
+                type="button"
+                onClick={handleToggleUserMgmt}
+                className={`w-full flex items-center justify-between h-10 px-3.5 rounded-lg text-sm font-medium transition cursor-pointer select-none ${
+                  isUserMgmtActive && !userMgmtOpen
                     ? 'text-blue-600 dark:text-blue-400 bg-blue-50/80 dark:bg-blue-950/60 font-semibold'
+                    : isUserMgmtActive
+                    ? 'text-gray-900 dark:text-gray-100 bg-gray-100/80 dark:bg-gray-800/80'
                     : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800'
                 } ${!sidebarExpanded ? 'lg:justify-center' : ''}`}
-                title={item.label}
+                title="User Management"
+                aria-expanded={userMgmtOpen}
               >
-                <Icon className="w-5 h-5 shrink-0" />
-                <span
-                  className={`truncate transition-opacity duration-200 ${
-                    !sidebarExpanded ? 'lg:hidden' : 'block'
-                  }`}
-                >
-                  {item.label}
-                </span>
-              </NavLink>
-            )
-          })}
+                <div className="flex items-center gap-3 min-w-0">
+                  <Users className="w-5 h-5 shrink-0 text-gray-500 dark:text-gray-400" />
+                  <span
+                    className={`truncate transition-opacity duration-200 ${
+                      !sidebarExpanded ? 'lg:hidden' : 'block'
+                    }`}
+                  >
+                    User Management
+                  </span>
+                </div>
+                <ChevronDown
+                  className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 shrink-0 ${
+                    userMgmtOpen ? 'rotate-180' : ''
+                  } ${!sidebarExpanded ? 'lg:hidden' : 'block'}`}
+                />
+              </button>
+
+              {/* Submenu Items (Smooth Accordion Animation) */}
+              <div
+                className={`grid transition-[grid-template-rows,opacity] duration-200 ease-in-out ${
+                  userMgmtOpen && sidebarExpanded
+                    ? 'grid-rows-[1fr] opacity-100'
+                    : 'grid-rows-[0fr] opacity-0 pointer-events-none'
+                }`}
+              >
+                <div className="overflow-hidden">
+                  <div
+                    className={`space-y-1 pt-1 ${
+                      !sidebarExpanded
+                        ? 'lg:hidden'
+                        : 'ml-4 pl-3.5 border-l border-gray-200 dark:border-gray-800'
+                    }`}
+                  >
+                    {userMgmtSubItems.map((subItem) => {
+                      const SubIcon = subItem.icon
+                      const isSubActive = location.pathname.startsWith(subItem.to)
+
+                      return (
+                        <NavLink
+                          key={subItem.to}
+                          to={subItem.to}
+                          onClick={() => setMobileOpen(false)}
+                          className={`flex items-center gap-2.5 h-10 px-3 rounded-lg text-sm font-medium transition cursor-pointer ${
+                            isSubActive
+                              ? 'text-blue-600 dark:text-blue-400 bg-blue-50/80 dark:bg-blue-950/60 font-semibold'
+                              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800'
+                          }`}
+                          title={subItem.label}
+                        >
+                          <SubIcon className="w-4 h-4 shrink-0" />
+                          <span className="truncate">{subItem.label}</span>
+                        </NavLink>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </aside>
 

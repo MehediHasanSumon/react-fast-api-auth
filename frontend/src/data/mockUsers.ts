@@ -24,7 +24,8 @@ export interface UserRecord {
   id: string
   name: string
   email: string
-  role: UserRole
+  role: string
+  roles?: string[]
   department: Department
   status: UserStatus
   phoneNumber?: string

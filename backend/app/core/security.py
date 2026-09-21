@@ -172,6 +172,45 @@ def set_auth_cookies(
         )
 
 
+def set_user_display_cookie(
+    response: Response,
+    user: Any,
+    remember_me: bool = False,
+) -> None:
+    """
+    Set or update client-readable user_display cookie with fresh user details.
+    """
+    display_max_age = (
+        settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+        if remember_me
+        else 7 * 24 * 60 * 60
+    )
+    user_display = {
+        "id": str(user.id),
+        "name": user.name,
+        "email": user.email,
+        "avatar": user.avatar,
+        "status": user.status.value if hasattr(user.status, "value") else str(user.status),
+        "mobile_number": user.mobile_number,
+        "is_verified": user.is_verified,
+        "roles": user.role_names_list if hasattr(user, "role_names_list") else [],
+        "permissions": user.all_permissions_list if hasattr(user, "all_permissions_list") else [],
+        "created_at": user.created_at.isoformat() if hasattr(user, "created_at") and user.created_at else None,
+    }
+    serialized = quote(json.dumps(user_display, default=str))
+    response.set_cookie(
+        key=settings.COOKIE_NAME_USER_DISPLAY,
+        value=serialized,
+        max_age=display_max_age,
+        expires=display_max_age,
+        httponly=False,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        path=settings.COOKIE_PATH,
+        domain=settings.COOKIE_DOMAIN,
+    )
+
+
 def clear_auth_cookies(response: Response) -> None:
     """
     Instruct the browser to delete all authentication and display cookies.

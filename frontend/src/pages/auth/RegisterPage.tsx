@@ -8,6 +8,8 @@ import { UserPlus } from 'lucide-react'
 import { AuthCard } from './AuthCard'
 import { Input, Checkbox, Button, Alert } from '../../components/ui'
 import { apiClient, API_ENDPOINTS, normalizeApiError, setAuthTokens } from '../../api'
+import { useAppDispatch } from '../../store/hooks'
+import { setUser, type AuthUser } from '../../store/slices/authSlice'
 
 const registerSchema = z
   .object({
@@ -29,6 +31,7 @@ type RegisterFormValues = z.infer<typeof registerSchema>
 export const RegisterPage = () => {
   const [serverError, setServerError] = useState<string | null>(null)
   const navigate = useNavigate()
+  const dispatch = useAppDispatch()
 
   const {
     register,
@@ -50,6 +53,7 @@ export const RegisterPage = () => {
       setServerError(null)
       const response = await apiClient.post<{
         message: string
+        user?: AuthUser
         access_token?: string
       }>(API_ENDPOINTS.AUTH.REGISTER, {
         name: values.fullName,
@@ -63,7 +67,11 @@ export const RegisterPage = () => {
         })
       }
 
-      navigate('/')
+      if (response.data?.user) {
+        dispatch(setUser(response.data.user))
+      }
+
+      navigate('/dashboard', { replace: true })
     } catch (err) {
       const apiErr = normalizeApiError(err as AxiosError)
       if (apiErr.errors) {

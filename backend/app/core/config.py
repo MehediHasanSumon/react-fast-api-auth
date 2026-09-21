@@ -32,6 +32,25 @@ class Settings(BaseSettings):
     COOKIE_DOMAIN: Union[str, None] = None
     COOKIE_PATH: str = "/"
 
+    # SMTP Email Configuration
+    SMTP_HOST: Union[str, None] = None
+    SMTP_PORT: int = 587
+    SMTP_USER: Union[str, None] = None
+    SMTP_PASSWORD: Union[str, None] = None
+    SMTP_FROM_EMAIL: Union[str, None] = None
+    SMTP_FROM_NAME: str = "Access Portal"
+    SMTP_TLS: bool = True
+    SMTP_SSL: bool = False
+
+    # Frontend URL & Static Uploads
+    FRONTEND_URL: str = "http://localhost:5173"
+    UPLOAD_DIR: str = "uploads"
+
+    @property
+    def uploads_path(self) -> str:
+        base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        return os.path.join(base, self.UPLOAD_DIR)
+
     # Database Settings (PostgreSQL)
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_PORT: int = 5432

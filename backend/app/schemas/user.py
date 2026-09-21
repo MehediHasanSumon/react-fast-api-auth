@@ -39,6 +39,12 @@ class UserItemResponse(BaseModel):
         res = super().model_validate(obj, *args, **kwargs)
         if hasattr(obj, "role_names_list"):
             res.roles = obj.role_names_list
+            if obj.role_names_list:
+                res.role = ", ".join(obj.role_names_list)
+            elif hasattr(obj, "role") and obj.role and obj.role != "N/A":
+                res.role = obj.role
+            else:
+                res.role = "—"
         if hasattr(obj, "all_permissions_list"):
             res.permissions = obj.all_permissions_list
         return res

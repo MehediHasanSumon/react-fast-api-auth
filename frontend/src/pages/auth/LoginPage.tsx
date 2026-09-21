@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -8,9 +8,21 @@ import { LogIn, Eye, EyeOff } from 'lucide-react'
 import { AuthCard } from './AuthCard'
 import { Input, Checkbox, Button, Alert } from '../../components/ui'
 import { apiClient, API_ENDPOINTS, normalizeApiError, setAuthTokens } from '../../api'
+import { useAppDispatch } from '../../store/hooks'
+import { setUser, type AuthUser } from '../../store/slices/authSlice'
 
 const loginSchema = z.object({
-  email: z.string().min(1, { message: 'Email address is required' }).email({ message: 'Enter a valid email address' }),
+  identifier: z
+    .string()
+    .min(1, { message: 'Enter email address or mobile number' })
+    .refine(
+      (val) => {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+        const phoneRegex = /^[0-9+()\- ]{7,20}$/
+        return emailRegex.test(val.trim()) || phoneRegex.test(val.trim())
+      },
+      { message: 'Enter a valid email address or contact number' }
+    ),
   password: z.string().min(1, { message: 'Password is required' }),
   rememberMe: z.boolean().optional(),
 })
@@ -21,6 +33,8 @@ export const LoginPage = () => {
   const [showPassword, setShowPassword] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
   const navigate = useNavigate()
+  const location = useLocation()
+  const dispatch = useAppDispatch()
 
   const {
     register,
@@ -29,7 +43,7 @@ export const LoginPage = () => {
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      email: '',
+      identifier: '',
       password: '',
       rememberMe: false,
     },
@@ -40,9 +54,10 @@ export const LoginPage = () => {
       setServerError(null)
       const response = await apiClient.post<{
         message: string
+        user?: AuthUser
         access_token?: string
       }>(API_ENDPOINTS.AUTH.LOGIN, {
-        email: values.email,
+        email: values.identifier.trim(),
         password: values.password,
         remember_me: values.rememberMe,
       })
@@ -53,7 +68,12 @@ export const LoginPage = () => {
         })
       }
 
-      navigate('/')
+      if (response.data?.user) {
+        dispatch(setUser(response.data.user))
+      }
+
+      const from = (location.state as { from?: Location })?.from?.pathname || '/dashboard'
+      navigate(from, { replace: true })
     } catch (err) {
       const apiErr = normalizeApiError(err as AxiosError)
       setServerError(apiErr.message)
@@ -83,14 +103,14 @@ export const LoginPage = () => {
           </Alert>
         )}
 
-        {/* Email */}
+        {/* Email or Mobile Number */}
         <Input
-          label="Email Address"
-          type="email"
+          label="Email Address or Mobile Number"
+          type="text"
           required
-          placeholder="Enter email address"
-          error={errors.email?.message}
-          {...register('email')}
+          placeholder="Enter email address or mobile number"
+          error={errors.identifier?.message}
+          {...register('identifier')}
         />
 
         {/* Password */}

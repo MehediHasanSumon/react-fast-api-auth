@@ -12,9 +12,41 @@ class UserRegisterRequest(BaseModel):
 
 
 class UserLoginRequest(BaseModel):
-    email: EmailStr = Field(..., description="Registered email address")
+    email: str = Field(..., min_length=1, description="Registered email address or mobile number")
     password: str = Field(..., min_length=1, description="Account password")
     remember_me: bool = Field(default=False, description="Extend session duration")
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr = Field(..., description="Registered account email address")
+
+
+class VerifyResetTokenRequest(BaseModel):
+    email: EmailStr = Field(..., description="Account email address")
+    token_or_otp: str = Field(..., min_length=1, description="6-digit OTP code or reset token")
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr = Field(..., description="Account email address")
+    token_or_otp: str = Field(..., min_length=1, description="6-digit OTP code or reset token")
+    password: str = Field(..., min_length=8, max_length=128, description="New password (at least 8 characters)")
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, description="Current password")
+    new_password: str = Field(..., min_length=8, max_length=128, description="New password (at least 8 characters)")
+    confirm_new_password: str = Field(..., min_length=8, max_length=128, description="Confirm new password")
+
+
+class UpdateProfileRequest(BaseModel):
+    name: str = Field(..., min_length=2, max_length=100, description="Full name")
+    mobile_number: Optional[str] = Field(None, max_length=20, description="Mobile contact number")
+
+
+class AvatarUploadResponse(BaseModel):
+    message: str
+    avatar_url: str
+    user: "UserResponse"
 
 
 class UserResponse(BaseModel):
@@ -25,8 +57,8 @@ class UserResponse(BaseModel):
     avatar: Optional[str] = None
     is_verified: bool
     status: str
-    role: Optional[str] = "Doctor"
-    department: Optional[str] = "General Medicine"
+    role: Optional[str] = "User"
+    department: Optional[str] = "General"
     roles: List[str] = Field(default_factory=list)
     permissions: List[str] = Field(default_factory=list)
     created_at: Optional[datetime] = None

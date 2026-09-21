@@ -1,12 +1,9 @@
-import React, { useState } from 'react'
+import React from 'react'
 import {
   User,
-  Copy,
-  Check,
   Pencil,
   CheckCircle2,
   AlertCircle,
-  Calendar,
   Phone,
   Mail,
   Shield,
@@ -29,21 +26,7 @@ export const UserDetailsModal: React.FC<UserDetailsModalProps> = ({
   onClose,
   onEdit,
 }) => {
-  const [isCopied, setIsCopied] = useState(false)
-
   if (!user) return null
-
-  const handleCopyId = async () => {
-    try {
-      await navigator.clipboard.writeText(user.id)
-      setIsCopied(true)
-      setTimeout(() => setIsCopied(false), 2000)
-    } catch {
-      // Fallback if clipboard API fails
-      setIsCopied(true)
-      setTimeout(() => setIsCopied(false), 2000)
-    }
-  }
 
   const statusVariant =
     user.status === 'Active'
@@ -137,46 +120,20 @@ export const UserDetailsModal: React.FC<UserDetailsModalProps> = ({
               <Shield className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span>Assigned Role</span>
             </div>
-            <p className="text-sm font-normal text-gray-900 dark:text-gray-100">
-              N/A
-            </p>
-          </div>
-
-          {/* Joined Date */}
-          <div className="p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 space-y-1">
-            <div className="flex items-center gap-1.5 text-xs font-normal text-gray-500 dark:text-gray-400">
-              <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-              <span>Registration Date</span>
-            </div>
-            <p className="text-sm font-normal text-gray-900 dark:text-gray-100">
-              {user.joinedDate || 'Standard record'}
-            </p>
-          </div>
-
-          {/* System Account ID */}
-          <div className="sm:col-span-2 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 space-y-1.5">
-            <span className="text-xs font-normal text-gray-500 dark:text-gray-400">
-              System Account UUID
-            </span>
-            <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-gray-50 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-800 text-xs font-mono text-gray-800 dark:text-gray-200">
-              <span className="truncate">{user.id}</span>
-              <button
-                type="button"
-                onClick={handleCopyId}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs font-normal bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600 transition cursor-pointer shrink-0"
-              >
-                {isCopied ? (
-                  <>
-                    <Check className="w-3 h-3 text-green-600 dark:text-green-400" />
-                    <span>Copied!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3 h-3 text-gray-500 dark:text-gray-400" />
-                    <span>Copy ID</span>
-                  </>
-                )}
-              </button>
+            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+              {user.roles && user.roles.length > 0 ? (
+                user.roles.map((r) => (
+                  <Badge key={r} variant="neutral" className="font-normal text-2xs">
+                    {r}
+                  </Badge>
+                ))
+              ) : user.role && user.role !== '—' && user.role !== 'N/A' ? (
+                <Badge variant="neutral" className="font-normal text-2xs">
+                  {user.role}
+                </Badge>
+              ) : (
+                <span className="text-sm font-normal text-gray-500 dark:text-gray-400">No role assigned</span>
+              )}
             </div>
           </div>
         </div>

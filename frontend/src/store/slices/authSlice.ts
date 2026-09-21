@@ -23,32 +23,81 @@ interface AuthState {
   error: string | null
 }
 
+const USER_PROFILE_STORAGE_KEY = 'hms_user_profile'
+
 /**
- * Synchronously retrieve display profile from client cookie
+ * Synchronously retrieve display profile from client cookie or localStorage fallback
  * Allows zero API calls on page reload (0ms instant UI rendering)
  */
 export const getUserFromDisplayCookie = (): AuthUser | null => {
   if (typeof document === 'undefined') return null
   try {
-    const match = document.cookie.match(/(?:^|;\s*)hms_user_display=([^;]*)/)
-    if (!match || !match[1]) return null
-    const decoded = decodeURIComponent(match[1])
-    const parsed = JSON.parse(decoded) as AuthUser
-    if (parsed && parsed.name && parsed.email) {
-      return parsed
+    const match = document.cookie.match(/(?:^|;\s*)(?:app_user_display|hms_user_display)=([^;]*)/)
+    if (match && match[1]) {
+      const decoded = decodeURIComponent(match[1])
+      const parsed = JSON.parse(decoded) as AuthUser
+      if (parsed && parsed.name && parsed.email) {
+        return parsed
+      }
     }
-    return null
   } catch {
-    return null
+    // Cookie parsing error fallback
+  }
+
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const stored = localStorage.getItem(USER_PROFILE_STORAGE_KEY)
+      if (stored) {
+        const parsed = JSON.parse(stored) as AuthUser
+        if (parsed && parsed.name && parsed.email) {
+          return parsed
+        }
+      }
+    } catch {
+      // LocalStorage parsing fallback
+    }
+  }
+
+  return null
+}
+
+/**
+ * Persist user display profile to cookie and localStorage
+ */
+export const persistUserDisplay = (user: AuthUser): void => {
+  if (typeof document !== 'undefined') {
+    try {
+      const serialized = encodeURIComponent(JSON.stringify(user))
+      document.cookie = `app_user_display=${serialized}; max-age=604800; path=/; SameSite=Lax`
+    } catch {
+      // Cookie write error fallback
+    }
+  }
+
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(USER_PROFILE_STORAGE_KEY, JSON.stringify(user))
+    } catch {
+      // LocalStorage quota or access fallback
+    }
   }
 }
 
 /**
- * Helper to remove client display cookie on logout
+ * Helper to remove client display cookie and stored profile on logout
  */
 export const clearUserDisplayCookie = (): void => {
-  if (typeof document === 'undefined') return
-  document.cookie = 'hms_user_display=; Max-Age=0; path=/;'
+  if (typeof document !== 'undefined') {
+    document.cookie = 'app_user_display=; Max-Age=0; path=/;'
+    document.cookie = 'hms_user_display=; Max-Age=0; path=/;'
+  }
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.removeItem(USER_PROFILE_STORAGE_KEY)
+    } catch {
+      // Ignore removal error
+    }
+  }
 }
 
 const initialUser = getUserFromDisplayCookie()
@@ -95,6 +144,13 @@ export const authSlice = createSlice({
       state.isAuthenticated = true
       state.isLoading = false
       state.error = null
+      persistUserDisplay(action.payload)
+    },
+    updateUserProfile: (state, action: PayloadAction<Partial<AuthUser>>) => {
+      if (state.user) {
+        state.user = { ...state.user, ...action.payload }
+        persistUserDisplay(state.user)
+      }
     },
     clearUser: (state) => {
       state.user = null
@@ -115,6 +171,7 @@ export const authSlice = createSlice({
         state.isAuthenticated = true
         state.isLoading = false
         state.error = null
+        persistUserDisplay(action.payload)
       })
       .addCase(fetchCurrentUser.rejected, (state, action) => {
         state.user = null
@@ -132,5 +189,5 @@ export const authSlice = createSlice({
   },
 })
 
-export const { setUser, clearUser } = authSlice.actions
+export const { setUser, updateUserProfile, clearUser } = authSlice.actions
 export default authSlice.reducer

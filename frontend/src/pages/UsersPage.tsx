@@ -37,7 +37,6 @@ import {
   DEFAULT_FILTER_CRITERIA,
   type UserFilterCriteria,
   type UserRecord,
-  type UserRole,
   type Department,
   type UserStatus,
 } from '../data/mockUsers'
@@ -49,6 +48,7 @@ interface BackendUserItem {
   mobile_number: string | null
   avatar: string | null
   role: string
+  roles?: string[]
   department: string
   status: string
   is_verified: boolean
@@ -82,12 +82,25 @@ const mapBackendUserToRecord = (u: BackendUserItem): UserRecord => {
     }
   }
 
+  const roleDisplay =
+    u.roles && u.roles.length > 0
+      ? u.roles.join(', ')
+      : u.role && u.role !== 'N/A'
+      ? u.role
+      : '—'
+
   return {
     id: u.id,
     name: u.name,
     email: u.email,
-    role: (u.role as UserRole) || 'Doctor',
-    department: (u.department as Department) || 'General Medicine',
+    role: roleDisplay,
+    roles:
+      u.roles && u.roles.length > 0
+        ? u.roles
+        : u.role && u.role !== 'N/A' && u.role !== '—'
+        ? [u.role]
+        : [],
+    department: (u.department as Department) || 'Operations',
     status: uiStatus,
     phoneNumber: u.mobile_number || undefined,
     isVerified: Boolean(u.is_verified),
@@ -407,8 +420,8 @@ export const UsersPage: React.FC = () => {
       u.id,
       `"${u.name}"`,
       `"${u.email}"`,
-      `"${u.phoneNumber || 'N/A'}"`,
-      'N/A',
+      `"${u.phoneNumber || '—'}"`,
+      `"${u.roles && u.roles.length > 0 ? u.roles.join(', ') : (u.role && u.role !== 'N/A' ? u.role : '—')}"`,
       u.status,
       u.isVerified ? 'Verified' : 'Unverified',
     ])
@@ -846,8 +859,22 @@ export const UsersPage: React.FC = () => {
                         </td>
 
                         {/* Role */}
-                        <td className="py-3.5 px-4 font-normal text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                          N/A
+                        <td className="py-3.5 px-4 font-normal text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                          {user.roles && user.roles.length > 0 ? (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {user.roles.map((r) => (
+                                <Badge key={r} variant="neutral" className="font-normal text-2xs">
+                                  {r}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : user.role && user.role !== '—' && user.role !== 'N/A' ? (
+                            <Badge variant="neutral" className="font-normal text-2xs">
+                              {user.role}
+                            </Badge>
+                          ) : (
+                            <span className="text-gray-400 dark:text-gray-500">—</span>
+                          )}
                         </td>
 
                         {/* Status (Is Active) */}
@@ -968,7 +995,19 @@ export const UsersPage: React.FC = () => {
                       </div>
                       <div>
                         <span className="text-gray-400 dark:text-gray-500 block text-2xs uppercase font-normal">Role</span>
-                        <span className="text-gray-800 dark:text-gray-200 font-normal">N/A</span>
+                        <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                          {user.roles && user.roles.length > 0 ? (
+                            user.roles.map((r) => (
+                              <Badge key={r} variant="neutral" className="font-normal text-2xs">
+                                {r}
+                              </Badge>
+                            ))
+                          ) : (
+                            <span className="text-gray-800 dark:text-gray-200 font-normal text-xs">
+                              {user.role && user.role !== 'N/A' ? user.role : '—'}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>

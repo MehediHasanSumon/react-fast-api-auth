@@ -10,6 +10,7 @@ import { DashboardPage } from './pages/DashboardPage'
 import { UsersPage } from './pages/UsersPage'
 import { RolesPage } from './pages/RolesPage'
 import { PermissionsPage } from './pages/PermissionsPage'
+import { ProfilePage } from './pages/ProfilePage'
 
 // Authentication Pages
 import { LoginPage } from './pages/auth/LoginPage'
@@ -58,6 +59,10 @@ export const router = createBrowserRouter([
           {
             path: 'permissions',
             element: <PermissionsPage />,
+          },
+          {
+            path: 'profile',
+            element: <ProfilePage />,
           },
         ],
       },

@@ -111,6 +111,14 @@ def list_users(
     # Build response models
     items = []
     for u in users:
+        role_names = u.role_names_list
+        if role_names:
+            primary_role = ", ".join(role_names)
+        elif u.role and u.role != "N/A":
+            primary_role = u.role
+        else:
+            primary_role = "—"
+
         items.append(
             UserItemResponse(
                 id=str(u.id),
@@ -118,8 +126,10 @@ def list_users(
                 email=u.email,
                 mobile_number=u.mobile_number,
                 avatar=u.avatar,
-                role="N/A",
-                department="N/A",
+                role=primary_role,
+                roles=role_names,
+                permissions=u.all_permissions_list,
+                department=u.department or "General",
                 status=u.status.value if hasattr(u.status, "value") else str(u.status),
                 is_verified=u.is_verified,
                 created_at=u.created_at,
@@ -244,14 +254,24 @@ def update_user_status(
     db.commit()
     db.refresh(user)
 
+    role_names = user.role_names_list
+    if role_names:
+        primary_role = ", ".join(role_names)
+    elif user.role and user.role != "N/A":
+        primary_role = user.role
+    else:
+        primary_role = "—"
+
     return UserItemResponse(
         id=str(user.id),
         name=user.name,
         email=user.email,
         mobile_number=user.mobile_number,
         avatar=user.avatar,
-        role=user.role,
-        department=user.department,
+        role=primary_role,
+        roles=role_names,
+        permissions=user.all_permissions_list,
+        department=user.department or "General",
         status=user.status.value if hasattr(user.status, "value") else str(user.status),
         is_verified=user.is_verified,
         created_at=user.created_at,
