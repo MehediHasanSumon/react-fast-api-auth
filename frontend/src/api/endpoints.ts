@@ -2,7 +2,6 @@
  * Centralized API endpoints for the Application
  */
 export const API_ENDPOINTS = {
-  HEALTH: '/health',
   AUTH: {
     LOGIN: '/auth/login',
     REGISTER: '/auth/register',

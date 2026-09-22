@@ -92,7 +92,6 @@ export const normalizeApiError = (error: AxiosError<unknown>): ApiErrorDetail =>
       message = data.detail
     } else if (Array.isArray(data.detail)) {
       // FastAPI 422 validation errors array
-      message = 'Please correct the highlighted form errors and try again.'
       errors = {}
       const rawErrors = data.detail as ApiValidationErrorItem[]
       for (const item of rawErrors) {
@@ -104,6 +103,19 @@ export const normalizeApiError = (error: AxiosError<unknown>): ApiErrorDetail =>
           errors[fieldName] = []
         }
         errors[fieldName].push(item.msg || 'Invalid field value')
+      }
+
+      if (rawErrors.length === 1 && rawErrors[0].msg) {
+        const fieldName =
+          Array.isArray(rawErrors[0].loc) && rawErrors[0].loc.length > 0
+            ? String(rawErrors[0].loc[rawErrors[0].loc.length - 1])
+            : ''
+        message =
+          fieldName && fieldName !== 'body'
+            ? `${fieldName}: ${rawErrors[0].msg}`
+            : rawErrors[0].msg
+      } else {
+        message = 'Please correct the highlighted form errors and try again.'
       }
     } else if (typeof data.message === 'string') {
       message = data.message
@@ -123,9 +135,20 @@ export const normalizeApiError = (error: AxiosError<unknown>): ApiErrorDetail =>
 /**
  * REQUEST INTERCEPTOR
  * Automatically attaches Authorization header if an access token is stored
+ * Automatically handles FormData multipart boundary creation by stripping default application/json
  */
 apiClient.interceptors.request.use(
   (config: CustomInternalAxiosRequestConfig) => {
+    // If request payload is FormData, remove default Content-Type so browser/Axios sets multipart/form-data with boundary
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+      delete config.headers['Content-Type']
+      delete config.headers['content-type']
+      if (typeof config.headers.delete === 'function') {
+        config.headers.delete('Content-Type')
+        config.headers.delete('content-type')
+      }
+    }
+
     if (!config.skipAuth) {
       const token = getAccessToken()
       if (token) {
@@ -159,13 +182,42 @@ apiClient.interceptors.response.use(
     // 401 Unauthorized handling
     if (status === 401) {
       const requestUrl = originalRequest.url || ''
-      const isAuthEndpoint =
-        requestUrl.includes(API_ENDPOINTS.AUTH.LOGIN) ||
-        requestUrl.includes(API_ENDPOINTS.AUTH.REFRESH) ||
-        originalRequest.skipAuth
 
-      // If already retried or this was an authentication endpoint, fail immediately
-      if (originalRequest._retry || isAuthEndpoint) {
+      // Unauthenticated public endpoints (login, register, forgot-password, etc.):
+      // Wrong credentials or unauthenticated submissions must reject with the error message
+      // and NEVER emit 'session_expired' or redirect to /session-expired.
+      const isPublicAuthEndpoint =
+        requestUrl.includes(API_ENDPOINTS.AUTH.LOGIN) ||
+        requestUrl.includes(API_ENDPOINTS.AUTH.REGISTER) ||
+        requestUrl.includes(API_ENDPOINTS.AUTH.FORGOT_PASSWORD) ||
+        requestUrl.includes(API_ENDPOINTS.AUTH.VERIFY_RESET_TOKEN) ||
+        requestUrl.includes(API_ENDPOINTS.AUTH.RESET_PASSWORD) ||
+        requestUrl.includes(API_ENDPOINTS.AUTH.VERIFY_OTP) ||
+        requestUrl.includes(API_ENDPOINTS.AUTH.CONFIRM_PASSWORD) ||
+        Boolean(originalRequest.skipAuth)
+
+      if (isPublicAuthEndpoint) {
+        return Promise.reject(normalizeApiError(error))
+      }
+
+      const errorDetail = (error.response?.data as Record<string, unknown>)?.detail
+      const isUserRemoved =
+        typeof errorDetail === 'string' &&
+        (errorDetail.toLowerCase().includes('not found') ||
+          errorDetail.toLowerCase().includes('removed') ||
+          errorDetail.toLowerCase().includes('inactive'))
+
+      // If user account was removed from DB, do not attempt refresh - immediately clear and notify
+      if (isUserRemoved) {
+        clearAuthTokens()
+        emitAuthUnauthorized('user_removed')
+        return Promise.reject(normalizeApiError(error))
+      }
+
+      const isRefreshEndpoint = requestUrl.includes(API_ENDPOINTS.AUTH.REFRESH)
+
+      // If already retried or this was the token refresh endpoint itself failing, session is truly expired
+      if (originalRequest._retry || isRefreshEndpoint) {
         clearAuthTokens()
         emitAuthUnauthorized('session_expired')
         return Promise.reject(normalizeApiError(error))
@@ -251,6 +303,21 @@ apiClient.interceptors.response.use(
         return Promise.reject(normalizeApiError(error))
       } finally {
         isRefreshing = false
+      }
+    }
+
+    // 403 Forbidden: Account blocked, banned, or deactivated
+    if (status === 403) {
+      const errorDetail = (error.response?.data as Record<string, unknown>)?.detail
+      if (
+        typeof errorDetail === 'string' &&
+        (errorDetail.toLowerCase().includes('banned') ||
+          errorDetail.toLowerCase().includes('blocked') ||
+          errorDetail.toLowerCase().includes('deactivated'))
+      ) {
+        clearAuthTokens()
+        emitAuthUnauthorized('user_blocked')
+        return Promise.reject(normalizeApiError(error))
       }
     }
 

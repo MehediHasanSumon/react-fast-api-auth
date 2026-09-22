@@ -47,7 +47,8 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY . /app
 
 # Set permissions
-RUN chmod +x /app/entrypoint.sh && \
+RUN mkdir -p /app/uploads/avatars && \
+    chmod +x /app/entrypoint.sh && \
     chown -R appuser:appgroup /app
 
 # Switch to non-root user
@@ -55,10 +56,6 @@ USER appuser
 
 # Expose FastAPI application port
 EXPOSE 8000
-
-# Health check configuration
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -f http://localhost:8000/api/v1/health || exit 1
 
 # Entrypoint runs migrations before starting uvicorn
 ENTRYPOINT ["/app/entrypoint.sh"]

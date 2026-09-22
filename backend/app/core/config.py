@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5173"
     UPLOAD_DIR: str = "uploads"
 
+    # Rate Limiting & Account Security Settings
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_AUTH_PER_SECOND: int = 3      # Max requests per second for auth endpoints
+    RATE_LIMIT_LOGIN_PER_MINUTE: int = 10     # Max login attempts per minute
+    RATE_LIMIT_OTP_PER_MINUTE: int = 3        # Max forgot-password / OTP requests per minute
+    RATE_LIMIT_OTP_VERIFY_PER_MINUTE: int = 5 # Max OTP verification attempts per minute
+    MAX_FAILED_LOGIN_ATTEMPTS: int = 5        # Failed password attempts before lockout
+    ACCOUNT_LOCKOUT_MINUTES: int = 15         # Duration of lockout in minutes
+
     @property
     def uploads_path(self) -> str:
         base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

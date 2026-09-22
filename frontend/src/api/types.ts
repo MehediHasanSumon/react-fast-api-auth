@@ -67,3 +67,5 @@ export type AuthUnauthorizedReason =
   | 'refresh_failed'
   | 'invalid_token'
   | 'manual_logout'
+  | 'user_removed'
+  | 'user_blocked'

@@ -123,7 +123,7 @@ export const ProfilePage: React.FC = () => {
         avatar_url: string
       }>(API_ENDPOINTS.AUTH.UPLOAD_AVATAR, formData, {
         headers: {
-          'Content-Type': 'multipart/form-data',
+          'Content-Type': undefined,
         },
       })
 
@@ -133,7 +133,11 @@ export const ProfilePage: React.FC = () => {
       setTimeout(() => setAvatarSuccess(null), 4000)
     } catch (err) {
       const apiErr = normalizeApiError(err as AxiosError)
-      setAvatarError(apiErr.message)
+      const specificError =
+        apiErr.errors?.file?.[0] ||
+        apiErr.errors?.general?.[0] ||
+        apiErr.message
+      setAvatarError(specificError)
     } finally {
       setAvatarUploading(false)
       if (fileInputRef.current) {

@@ -1,5 +1,7 @@
 import json
 import secrets
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Union
 from urllib.parse import quote, unquote
@@ -7,6 +9,23 @@ import bcrypt
 import jwt
 from fastapi import Response
 from app.core.config import settings
+
+
+def hash_secret_token(token: str) -> str:
+    """
+    Compute cryptographic SHA-256 hash of an OTP code or reset token.
+    Ensures raw secrets are never stored in plaintext inside the database.
+    """
+    return hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+
+
+def verify_secret_token(plain_token: str, hashed_token: str) -> bool:
+    """
+    Perform constant-time comparison between a plaintext token and stored SHA-256 hash.
+    Protects against timing attacks.
+    """
+    computed = hash_secret_token(plain_token)
+    return hmac.compare_digest(computed, hashed_token)
 
 
 def hash_password(password: str) -> str:

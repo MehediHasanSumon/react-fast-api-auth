@@ -36,6 +36,19 @@ export const LoginPage = () => {
   const location = useLocation()
   const dispatch = useAppDispatch()
 
+  const locationState = location.state as { from?: Location; reason?: string } | null
+  const redirectReason = locationState?.reason || new URLSearchParams(location.search).get('reason')
+
+  const [sessionNotice, setSessionNotice] = useState<string | null>(() => {
+    if (redirectReason === 'user_removed') {
+      return 'Your account has been deleted or deactivated. Please contact an administrator.'
+    }
+    if (redirectReason === 'user_blocked') {
+      return 'Your account has been suspended or blocked. Please contact an administrator.'
+    }
+    return null
+  })
+
   const {
     register,
     handleSubmit,
@@ -97,9 +110,25 @@ export const LoginPage = () => {
       }
     >
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        {sessionNotice && !serverError && (
+          <Alert variant="danger" onClose={() => setSessionNotice(null)}>
+            <div>{sessionNotice}</div>
+          </Alert>
+        )}
+
         {serverError && (
           <Alert variant="danger" onClose={() => setServerError(null)}>
-            {serverError}
+            <div>{serverError}</div>
+            {serverError.toLowerCase().includes('locked') && (
+              <div className="mt-1.5 pt-1.5 border-t border-red-200/60 dark:border-red-800/60">
+                <Link
+                  to="/forgot-password"
+                  className="font-medium underline hover:text-red-900 dark:hover:text-red-200 inline-flex items-center gap-1"
+                >
+                  Click here to reset your password and unlock account
+                </Link>
+              </div>
+            )}
           </Alert>
         )}
 

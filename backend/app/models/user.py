@@ -1,7 +1,7 @@
 import uuid
 import enum
 from typing import List, Set, TYPE_CHECKING
-from sqlalchemy import Column, String, Boolean, Enum as SQLEnum
+from sqlalchemy import Column, String, Boolean, Integer, DateTime, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from app.db.base import Base, TimestampMixin
 from app.models.rbac import model_has_roles, model_has_permissions
@@ -28,6 +28,8 @@ class User(Base, TimestampMixin):
       - avatar: Image URL / path
       - password: Hash of password
       - is_verified: Email / phone verification status
+      - failed_login_attempts: Consecutive failed password attempts
+      - locked_until: Timestamp until which account is locked
       - status: User account state as PostgreSQL Enum (active, baned, blocked, deactived)
       - created_at & updated_at: Timestamps
       - roles: Many-to-Many relationship with Role (Spatie-style)
@@ -42,6 +44,8 @@ class User(Base, TimestampMixin):
     avatar = Column(String(500), nullable=True)
     password = Column(String(255), nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False, index=True)
+    failed_login_attempts = Column(Integer, default=0, nullable=False)
+    locked_until = Column(DateTime(timezone=True), nullable=True)
     role = Column(String(50), default="Doctor", nullable=False, index=True)
     department = Column(String(100), default="General Medicine", nullable=False, index=True)
     status = Column(

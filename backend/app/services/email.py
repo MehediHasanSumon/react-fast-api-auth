@@ -71,6 +71,14 @@ def send_email(
         return False
 
 
+last_dispatched_email: dict = {}
+
+
+def get_last_dispatched_email() -> dict:
+    """Return the most recently dispatched email details (useful for testing & development)."""
+    return last_dispatched_email
+
+
 def send_password_reset_email(
     to_email: str,
     user_name: str,
@@ -80,6 +88,14 @@ def send_password_reset_email(
     """
     Send password reset instructions with both 6-digit OTP and clickable Reset Link.
     """
+    global last_dispatched_email
+    last_dispatched_email = {
+        "to_email": to_email,
+        "user_name": user_name,
+        "otp": otp,
+        "reset_token": reset_token,
+    }
+
     reset_link = f"{settings.FRONTEND_URL}/verify-otp?email={to_email}&otp={otp}"
     subject = "Password Reset Request - Access Portal"
 

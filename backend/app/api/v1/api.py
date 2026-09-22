@@ -1,10 +1,7 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, health, users, roles, permissions
+from app.api.v1.endpoints import auth, users, roles, permissions
 
 api_router = APIRouter()
-
-# Health router
-api_router.include_router(health.router, tags=["Health"])
 
 # Authentication & Session router
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])

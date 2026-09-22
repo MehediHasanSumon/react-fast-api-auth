@@ -11,14 +11,13 @@ def client():
         yield c
 
 
-def test_health_check(client: TestClient):
-    """Verify health endpoint responds with healthy status."""
-    response = client.get(f"{settings.API_V1_STR}/health")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "healthy"
-    assert data["version"] == settings.VERSION
-    assert "timestamp" in data
+def test_unnecessary_endpoints_are_disabled(client: TestClient):
+    """Verify unnecessary diagnostic and documentation endpoints are completely removed/disabled."""
+    assert client.get(f"{settings.API_V1_STR}/health").status_code == 404
+    assert client.get(f"{settings.API_V1_STR}/openapi.json").status_code == 404
+    assert client.get("/docs").status_code == 404
+    assert client.get("/redoc").status_code == 404
+    assert client.get("/").status_code == 404
 
 
 def test_auth_me_unauthenticated(client: TestClient):

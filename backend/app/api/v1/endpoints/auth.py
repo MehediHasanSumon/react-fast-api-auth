@@ -8,9 +8,16 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session as OrmSession
 from PIL import Image, ImageOps
 
+import hmac
 from app.api.deps import get_current_user, get_db, get_token_from_request
 from app.core.config import settings
 from app.core.decorators import current_user, require_auth
+from app.core.ratelimit import (
+    login_limiter,
+    forgot_password_limiter,
+    verify_otp_limiter,
+    reset_password_limiter,
+)
 from app.core.security import (
     clear_auth_cookies,
     create_access_token,
@@ -18,6 +25,8 @@ from app.core.security import (
     decode_token,
     generate_opaque_token,
     hash_password,
+    hash_secret_token,
+    verify_secret_token,
     set_auth_cookies,
     set_user_display_cookie,
     verify_password,
@@ -171,6 +180,7 @@ def register(
     response_model=AuthResponse,
     summary="User Login",
     description="Authenticate credentials, record a session, and set HttpOnly cookies.",
+    dependencies=[Depends(login_limiter)],
 )
 def login(
     payload: UserLoginRequest,
@@ -178,6 +188,8 @@ def login(
     response: Response,
     db: OrmSession = Depends(get_db),
 ):
+    now_utc = datetime.now(timezone.utc)
+
     # 1. Fetch user by email or mobile number
     ident = payload.email.strip()
     user = (
@@ -190,12 +202,57 @@ def login(
         )
         .first()
     )
+
+    # If user exists, check lockout status
+    if user and user.locked_until:
+        locked_until_utc = (
+            user.locked_until
+            if user.locked_until.tzinfo
+            else user.locked_until.replace(tzinfo=timezone.utc)
+        )
+        if locked_until_utc > now_utc:
+            remaining_seconds = int((locked_until_utc - now_utc).total_seconds())
+            remaining_minutes = max(1, (remaining_seconds + 59) // 60)
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail=f"Account is temporarily locked due to multiple failed login attempts. Please try again in {remaining_minutes} minute(s) or reset your password.",
+                headers={"Retry-After": str(remaining_seconds)},
+            )
+        else:
+            # Lockout period elapsed, reset
+            user.failed_login_attempts = 0
+            user.locked_until = None
+            db.commit()
+
     if not user or not verify_password(payload.password, user.password):
+        if user:
+            user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
+            if user.failed_login_attempts >= settings.MAX_FAILED_LOGIN_ATTEMPTS:
+                user.locked_until = now_utc + timedelta(minutes=settings.ACCOUNT_LOCKOUT_MINUTES)
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_423_LOCKED,
+                    detail=f"Account has been locked due to {settings.MAX_FAILED_LOGIN_ATTEMPTS} consecutive failed login attempts. Please try again after {settings.ACCOUNT_LOCKOUT_MINUTES} minutes or reset your password.",
+                )
+            db.commit()
+            remaining = settings.MAX_FAILED_LOGIN_ATTEMPTS - user.failed_login_attempts
+            warning = f" {remaining} attempt(s) remaining before account lockout." if remaining > 0 else ""
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Invalid email/mobile number or password.{warning}",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email/mobile number or password.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Reset failed attempts upon successful password verification
+    if user.failed_login_attempts or user.locked_until:
+        user.failed_login_attempts = 0
+        user.locked_until = None
+        db.commit()
 
     # 2. Verify account status
     if user.status == UserStatus.BANED:
@@ -411,6 +468,12 @@ def logout(
 
 
 @router.get(
+    "/checkauthuser",
+    response_model=UserResponse,
+    summary="Check Authenticated User Profile",
+    description="Verify active user session and return fresh user details.",
+)
+@router.get(
     "/me",
     response_model=UserResponse,
     summary="Get Authenticated User Profile",
@@ -418,7 +481,7 @@ def logout(
 )
 @require_auth
 def get_me():
-    pass
+    return current_user()
 
 
 @router.get(
@@ -447,6 +510,7 @@ def get_user_sessions(
     response_model=MessageResponse,
     summary="Request Password Reset",
     description="Generate a secure 6-digit OTP code and direct reset link and send via email.",
+    dependencies=[Depends(forgot_password_limiter)],
 )
 def forgot_password(
     payload: ForgotPasswordRequest,
@@ -464,6 +528,8 @@ def forgot_password(
     # Generate 6-digit OTP code and secure reset token
     otp = f"{secrets.randbelow(900000) + 100000}"
     reset_token = secrets.token_urlsafe(32)
+    otp_hash = hash_secret_token(otp)
+    token_hash = hash_secret_token(reset_token)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
 
     # Invalidate prior unredeemed resets for this user
@@ -472,18 +538,21 @@ def forgot_password(
         PasswordReset.is_used == False,
     ).update({"is_used": True})
 
+    # Store cryptographic SHA-256 hashes only (no plaintext secrets in DB)
     reset_record = PasswordReset(
         user_id=user.id,
         email=user.email,
-        token=reset_token,
-        otp=otp,
+        token_hash=token_hash,
+        otp_hash=otp_hash,
+        token=None,
+        otp=None,
         expires_at=expires_at,
         is_used=False,
     )
     db.add(reset_record)
     db.commit()
 
-    # Dispatch email with both OTP and Reset Link
+    # Dispatch email with plain OTP and Reset Link to user
     send_password_reset_email(
         to_email=user.email,
         user_name=user.name,
@@ -501,6 +570,7 @@ def forgot_password(
     response_model=MessageResponse,
     summary="Verify Reset OTP or Token",
     description="Verify if a password reset token or 6-digit OTP is valid and unexpired.",
+    dependencies=[Depends(verify_otp_limiter)],
 )
 def verify_reset_token(
     payload: VerifyResetTokenRequest,
@@ -508,6 +578,7 @@ def verify_reset_token(
 ):
     email_clean = payload.email.lower().strip()
     code = payload.token_or_otp.strip()
+    code_hash = hash_secret_token(code)
     now_utc = datetime.now(timezone.utc)
 
     reset_record = (
@@ -516,7 +587,12 @@ def verify_reset_token(
             func.lower(PasswordReset.email) == email_clean,
             PasswordReset.is_used == False,
             PasswordReset.expires_at > now_utc,
-            or_(PasswordReset.token == code, PasswordReset.otp == code),
+            or_(
+                PasswordReset.token_hash == code_hash,
+                PasswordReset.otp_hash == code_hash,
+                PasswordReset.token == code,
+                PasswordReset.otp == code,
+            ),
         )
         .first()
     )
@@ -533,6 +609,7 @@ def verify_reset_token(
     response_model=AuthResponse,
     summary="Reset Password and Authenticate User",
     description="Update password using verified OTP or token, invalidate prior sessions, create fresh session and cookies.",
+    dependencies=[Depends(reset_password_limiter)],
 )
 def reset_password(
     payload: ResetPasswordRequest,
@@ -542,6 +619,7 @@ def reset_password(
 ):
     email_clean = payload.email.lower().strip()
     code = payload.token_or_otp.strip()
+    code_hash = hash_secret_token(code)
     now_utc = datetime.now(timezone.utc)
 
     reset_record = (
@@ -550,7 +628,12 @@ def reset_password(
             func.lower(PasswordReset.email) == email_clean,
             PasswordReset.is_used == False,
             PasswordReset.expires_at > now_utc,
-            or_(PasswordReset.token == code, PasswordReset.otp == code),
+            or_(
+                PasswordReset.token_hash == code_hash,
+                PasswordReset.otp_hash == code_hash,
+                PasswordReset.token == code,
+                PasswordReset.otp == code,
+            ),
         )
         .first()
     )
@@ -567,8 +650,10 @@ def reset_password(
             detail="User account not found.",
         )
 
-    # 1. Update password and mark token as used
+    # 1. Update password, clear failed attempts and unlock account, mark token as used
     user.password = hash_password(payload.password)
+    user.failed_login_attempts = 0
+    user.locked_until = None
     reset_record.is_used = True
 
     # 2. Invalidate all prior sessions for security
@@ -719,19 +804,48 @@ def upload_avatar(
     db: OrmSession = Depends(get_db),
 ):
     user = current_user()
-    allowed_types = {"image/jpeg", "image/png", "image/webp", "image/jpg"}
-    if file.content_type not in allowed_types:
+
+    # Case-insensitive MIME check with broader image type compatibility
+    content_type = (file.content_type or "").lower().strip()
+    allowed_types = {
+        "image/jpeg",
+        "image/jpg",
+        "image/pjpeg",
+        "image/png",
+        "image/x-png",
+        "image/webp",
+        "application/octet-stream",
+    }
+    if content_type and content_type not in allowed_types:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid file format. Only JPEG, PNG, and WebP images are supported.",
+        )
+
+    # File size limit (15MB)
+    MAX_FILE_SIZE = 15 * 1024 * 1024
+    file.file.seek(0, os.SEEK_END)
+    file_size = file.file.tell()
+    file.file.seek(0)
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File size exceeds the 15MB limit.",
         )
 
     # Pillow image validation and reading
     try:
         img = Image.open(file.file)
         img.verify()
+        if img.format not in ("JPEG", "PNG", "WEBP"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid image format. Supported formats are JPEG, PNG, and WebP.",
+            )
         file.file.seek(0)
         img = Image.open(file.file)
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

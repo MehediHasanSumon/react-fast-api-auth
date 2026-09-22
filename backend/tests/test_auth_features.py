@@ -64,6 +64,9 @@ def test_login_with_mobile_number(test_user):
     assert data["user"]["email"] == "auth_test@example.com"
 
 
+from app.services.email import get_last_dispatched_email
+
+
 def test_forgot_and_reset_password_with_otp(test_user):
     # 1. Request forgot password
     resp = client.post(
@@ -72,7 +75,13 @@ def test_forgot_and_reset_password_with_otp(test_user):
     )
     assert resp.status_code == 200
 
-    # 2. Retrieve OTP from DB
+    # 2. Retrieve plain OTP from dispatched email
+    last_email = get_last_dispatched_email()
+    otp = last_email.get("otp")
+    assert otp is not None
+    assert len(otp) == 6
+
+    # Verify DB contains only cryptographic hash, not plaintext OTP
     db = SessionLocal()
     record = (
         db.query(PasswordReset)
@@ -80,8 +89,9 @@ def test_forgot_and_reset_password_with_otp(test_user):
         .first()
     )
     assert record is not None
-    assert len(record.otp) == 6
-    otp = record.otp
+    assert record.otp is None  # Plaintext OTP not stored in DB
+    assert record.otp_hash is not None
+    assert len(record.otp_hash) == 64  # SHA-256 hex string
     db.close()
 
     # 3. Verify OTP
@@ -126,6 +136,10 @@ def test_reset_password_with_token(test_user):
         json={"email": "auth_test@example.com"},
     )
 
+    last_email = get_last_dispatched_email()
+    token = last_email.get("reset_token")
+    assert token is not None
+
     db = SessionLocal()
     record = (
         db.query(PasswordReset)
@@ -133,7 +147,8 @@ def test_reset_password_with_token(test_user):
         .first()
     )
     assert record is not None
-    token = record.token
+    assert record.token_hash is not None
+    assert len(record.token_hash) == 64
     db.close()
 
     # Reset with token

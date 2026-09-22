@@ -7,9 +7,9 @@ from app.api.v1.api import api_router
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    openapi_url=None,
+    docs_url=None,
+    redoc_url=None,
 )
 
 # Trust forwarded headers from reverse proxies (X-Forwarded-Proto, X-Forwarded-For, X-Forwarded-Host)
@@ -35,17 +35,3 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 upload_dir_path = settings.uploads_path
 os.makedirs(os.path.join(upload_dir_path, "avatars"), exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=upload_dir_path), name="uploads")
-
-
-@app.get("/", tags=["Root"])
-def root():
-    """
-    Root entry point providing API overview and documentation links.
-    """
-    return {
-        "message": f"Welcome to {settings.PROJECT_NAME}",
-        "version": settings.VERSION,
-        "docs": "/docs",
-        "redoc": "/redoc",
-        "api_v1": settings.API_V1_STR,
-    }

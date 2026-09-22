@@ -83,6 +83,8 @@ export const clearAuthTokens = (): void => {
   if (isBrowser) {
     try {
       localStorage.removeItem(USER_DATA_KEY)
+      document.cookie = 'app_user_display=; Max-Age=0; path=/;'
+      document.cookie = 'hms_user_display=; Max-Age=0; path=/;'
     } catch {
       // Ignore storage clear errors
     }
@@ -96,11 +98,19 @@ export const hasAccessToken = (): boolean => {
   return Boolean(getAccessToken())
 }
 
+let lastUnauthorizedEmit = 0
+
 /**
  * Broadcast an unauthorized event to notify application components / router
+ * Includes 1-second debounce to prevent duplicate event storms from concurrent failing API requests.
  */
 export const emitAuthUnauthorized = (reason: AuthUnauthorizedReason = 'session_expired'): void => {
   if (!isBrowser) return
+  const now = Date.now()
+  if (now - lastUnauthorizedEmit < 1000) {
+    return
+  }
+  lastUnauthorizedEmit = now
   window.dispatchEvent(
     new CustomEvent(UNAUTHORIZED_EVENT_NAME, {
       detail: { reason },

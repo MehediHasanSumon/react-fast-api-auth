@@ -1,6 +1,5 @@
 import { createAsyncThunk, createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import { apiClient, API_ENDPOINTS, clearAuthTokens, normalizeApiError } from '../../api'
-import type { AxiosError } from 'axios'
+import { apiClient, API_ENDPOINTS, clearAuthTokens } from '../../api'
 
 export interface AuthUser {
   id: string
@@ -109,17 +108,32 @@ const initialState: AuthState = {
   error: null,
 }
 
+export interface FetchCurrentUserError {
+  message: string
+  isAuthError: boolean
+}
+
 export const fetchCurrentUser = createAsyncThunk<
   AuthUser,
   void,
-  { rejectValue: string }
+  { rejectValue: FetchCurrentUserError }
 >('auth/fetchCurrentUser', async (_, { rejectWithValue }) => {
   try {
     const response = await apiClient.get<AuthUser>(API_ENDPOINTS.AUTH.ME)
     return response.data
-  } catch (err) {
-    const normalized = normalizeApiError(err as AxiosError)
-    return rejectWithValue(normalized.message)
+  } catch (err: unknown) {
+    const errorObj = err as {
+      status?: number
+      response?: { status?: number }
+      message?: string
+    }
+    const status = errorObj?.status ?? errorObj?.response?.status
+    const isAuthError = status === 401 || status === 403
+    const message = errorObj?.message || 'Failed to authenticate user'
+    return rejectWithValue({
+      message,
+      isAuthError,
+    })
   }
 })
 
@@ -163,7 +177,9 @@ export const authSlice = createSlice({
   extraReducers: (builder) => {
     builder
       .addCase(fetchCurrentUser.pending, (state) => {
-        state.isLoading = true
+        if (!state.user) {
+          state.isLoading = true
+        }
         state.error = null
       })
       .addCase(fetchCurrentUser.fulfilled, (state, action) => {
@@ -174,11 +190,16 @@ export const authSlice = createSlice({
         persistUserDisplay(action.payload)
       })
       .addCase(fetchCurrentUser.rejected, (state, action) => {
-        state.user = null
-        state.isAuthenticated = false
+        // Only clear user session on explicit authentication/authorization errors (401/403)
+        // If it's a temporary offline/network glitch or server error, retain session so user isn't logged out
+        if (action.payload?.isAuthError) {
+          state.user = null
+          state.isAuthenticated = false
+          clearUserDisplayCookie()
+          clearAuthTokens()
+        }
         state.isLoading = false
-        state.error = action.payload || 'Failed to authenticate user'
-        clearUserDisplayCookie()
+        state.error = action.payload?.message || 'Failed to authenticate user'
       })
       .addCase(logoutUser.fulfilled, (state) => {
         state.user = null
@@ -190,4 +211,6 @@ export const authSlice = createSlice({
 })
 
 export const { setUser, updateUserProfile, clearUser } = authSlice.actions
+export const logout = clearUser
+export const authUser = fetchCurrentUser
 export default authSlice.reducer
